@@ -6,6 +6,7 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const path = require('path'); // <<< BARU: Diperlukan untuk res.sendFile
 
 const app = express();
 const server = http.createServer(app);
@@ -36,22 +37,21 @@ const USER_ACCOUNTS = {
     }
 };
 
-const onlineUsers = {}; // Melacak Socket ID
-// RIWAYAT CHAT TIDAK PERLU DISIMPAN DI SERVER (KARENA SUDAH DI HANDLE DI LOCALSTORAGE DI CLIENT)
-// const chatHistory = []; 
+const onlineUsers = {};
 
-// --- PERBAIKAN 1: TAMBAHKAN ROUTE DASAR UNTUK MENGHINDARI "Cannot GET /" ---
+// --- PERBAIKAN UTAMA: SAJIKAN FILE HTML DARI ROOT PATH ---
 app.get('/', (req, res) => {
-    res.send('<h1>Server Album & Chat Berjalan!</h1><p>Server Socket.IO aktif.</p>');
+    // res.sendFile akan mengirimkan file 'index.html' yang berada di direktori saat ini
+    res.sendFile(path.join(__dirname, 'index.html')); 
 });
-// -------------------------------------------------------------------------
+// ---------------------------------------------------------
 
 io.on('connection', (socket) => {
     console.log(`[CONN] Pengguna terhubung: ${socket.id}`);
     
     // --- 1. IDENTIFIKASI & RIWAYAT ---
     socket.on('user_login', (userId) => {
-        // Hapus koneksi lama jika ada (Ini penting)
+        // Hapus koneksi lama jika ada
         for (const id in onlineUsers) {
             if (onlineUsers[id] === socket.id) {
                 delete onlineUsers[id];
@@ -62,10 +62,7 @@ io.on('connection', (socket) => {
         socket.userId = userId;
         console.log(`[ONLINE] ${userId} sekarang online. Socket: ${socket.id}`);
         
-        // Kirim semua detail akun ke klien
         socket.emit('load_users', USER_ACCOUNTS); 
-        
-        // Broadcast status
         io.emit('user_status_update', Object.keys(onlineUsers));
     });
 
@@ -74,46 +71,40 @@ io.on('connection', (socket) => {
         const { senderId } = data;
         const opponentId = senderId === 'zaza' ? 'khirza' : 'zaza';
         
-        // Data pesan lengkap yang akan dikirim ke kedua klien
         const messageData = {
-            ...data, // Termasuk message, media, timestamp, id
+            ...data, 
             status: 'sent',
             senderName: USER_ACCOUNTS[senderId].name,
         };
         
-        // Kirim ke Pengirim
         io.to(onlineUsers[senderId]).emit('receive_message', messageData); 
         
         const receiverSocketId = onlineUsers[opponentId];
         if (receiverSocketId) {
-            // Kirim ke Penerima
             io.to(receiverSocketId).emit('receive_message', messageData);
             
-            // Simulasi centang biru (read status)
             setTimeout(() => {
                 const readStatusData = {...messageData, status: 'read'};
                 io.to(onlineUsers[senderId]).emit('update_status', readStatusData);
             }, 1500); 
             
         } else {
-            // Jika offline, simulasikan centang 1 (sent)
             const sentStatusData = {...messageData, status: 'sent'};
             io.to(onlineUsers[senderId]).emit('update_status', sentStatusData);
         }
     });
     
-    // --- PERBAIKAN 2: TAMBAHKAN HANDLER HAPUS UNTUK SEMUA ORANG ---
+    // --- HANDLER HAPUS UNTUK SEMUA ORANG ---
     socket.on('delete_message_for_everyone', (data) => {
         const { id, senderId } = data;
         const opponentId = senderId === 'zaza' ? 'khirza' : 'zaza';
         
         const receiverSocketId = onlineUsers[opponentId];
         if (receiverSocketId) {
-            // Kirim notifikasi hapus ke klien lawan
             io.to(receiverSocketId).emit('message_deleted_for_everyone', { id: id });
         }
     });
-    // -------------------------------------------------------------------
+    // ----------------------------------------
 
     // --- 3. DISCONNECT ---
     socket.on('disconnect', () => {
