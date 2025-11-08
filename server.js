@@ -37,14 +37,21 @@ const USER_ACCOUNTS = {
 };
 
 const onlineUsers = {}; // Melacak Socket ID
-const chatHistory = []; // Menyimpan riwayat pesan sederhana
+// RIWAYAT CHAT TIDAK PERLU DISIMPAN DI SERVER (KARENA SUDAH DI HANDLE DI LOCALSTORAGE DI CLIENT)
+// const chatHistory = []; 
+
+// --- PERBAIKAN 1: TAMBAHKAN ROUTE DASAR UNTUK MENGHINDARI "Cannot GET /" ---
+app.get('/', (req, res) => {
+    res.send('<h1>Server Album & Chat Berjalan!</h1><p>Server Socket.IO aktif.</p>');
+});
+// -------------------------------------------------------------------------
 
 io.on('connection', (socket) => {
     console.log(`[CONN] Pengguna terhubung: ${socket.id}`);
     
     // --- 1. IDENTIFIKASI & RIWAYAT ---
     socket.on('user_login', (userId) => {
-        // Hapus koneksi lama jika ada
+        // Hapus koneksi lama jika ada (Ini penting)
         for (const id in onlineUsers) {
             if (onlineUsers[id] === socket.id) {
                 delete onlineUsers[id];
@@ -55,9 +62,6 @@ io.on('connection', (socket) => {
         socket.userId = userId;
         console.log(`[ONLINE] ${userId} sekarang online. Socket: ${socket.id}`);
         
-        // Kirim riwayat chat ke klien yang baru login
-        socket.emit('load_history', chatHistory); 
-        
         // Kirim semua detail akun ke klien
         socket.emit('load_users', USER_ACCOUNTS); 
         
@@ -67,27 +71,22 @@ io.on('connection', (socket) => {
 
     // --- 2. LOGIKA CHAT ---
     socket.on('send_message', (data) => {
-        const { senderId, message } = data;
+        const { senderId } = data;
         const opponentId = senderId === 'zaza' ? 'khirza' : 'zaza';
-        const timestamp = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-        const messageId = Date.now() + Math.random().toFixed(0); // ID Unik
-
+        
+        // Data pesan lengkap yang akan dikirim ke kedua klien
         const messageData = {
-            id: messageId,
-            senderId: senderId,
+            ...data, // Termasuk message, media, timestamp, id
+            status: 'sent',
             senderName: USER_ACCOUNTS[senderId].name,
-            message: message,
-            timestamp: timestamp,
-            status: 'sent'
         };
         
-        chatHistory.push(messageData);
-
-        // Kirim ke Pengirim dan Penerima
+        // Kirim ke Pengirim
         io.to(onlineUsers[senderId]).emit('receive_message', messageData); 
         
         const receiverSocketId = onlineUsers[opponentId];
         if (receiverSocketId) {
+            // Kirim ke Penerima
             io.to(receiverSocketId).emit('receive_message', messageData);
             
             // Simulasi centang biru (read status)
@@ -102,6 +101,19 @@ io.on('connection', (socket) => {
             io.to(onlineUsers[senderId]).emit('update_status', sentStatusData);
         }
     });
+    
+    // --- PERBAIKAN 2: TAMBAHKAN HANDLER HAPUS UNTUK SEMUA ORANG ---
+    socket.on('delete_message_for_everyone', (data) => {
+        const { id, senderId } = data;
+        const opponentId = senderId === 'zaza' ? 'khirza' : 'zaza';
+        
+        const receiverSocketId = onlineUsers[opponentId];
+        if (receiverSocketId) {
+            // Kirim notifikasi hapus ke klien lawan
+            io.to(receiverSocketId).emit('message_deleted_for_everyone', { id: id });
+        }
+    });
+    // -------------------------------------------------------------------
 
     // --- 3. DISCONNECT ---
     socket.on('disconnect', () => {
@@ -116,5 +128,5 @@ io.on('connection', (socket) => {
 // Jalankan server di port 3000
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Server Chat Berjalan di http://localhost:${PORT}`);
+    console.log(`Server Album & Chat Berjalan di http://localhost:${PORT}`);
 });
